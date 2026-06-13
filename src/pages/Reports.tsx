@@ -22,8 +22,7 @@ export default function Reports() {
     if (user.role === 'national') return reports;
     if (user.role === 'provincial' && user.provinceId) {
       return reports.filter((r) => 
-        r.scope === 'national' || 
-        (r.scope === 'provincial' && r.scopeId === user.provinceId)
+        r.scope === 'provincial' && r.scopeId === user.provinceId
       );
     }
     if ((user.role === 'agency' || user.role === 'examiner') && user.agencyId) {

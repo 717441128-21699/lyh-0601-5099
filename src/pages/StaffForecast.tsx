@@ -41,37 +41,81 @@ export default function StaffForecast() {
     );
   }
 
-  const getMockTargets = (fileName: string): Record<string, number> => {
-    const months = ['2024-07', '2024-08', '2024-09', '2024-10', '2024-11', '2024-12'];
+  const formatMonthKey = (monthStr: string): string => {
+    if (!monthStr) return '';
+    const trimmed = String(monthStr).trim();
     
-    if (fileName.includes('方案A') || fileName.includes('高标准') || fileName.includes('高目标')) {
-      return {
-        [months[0]]: 1800,
-        [months[1]]: 2100,
-        [months[2]]: 2400,
-        [months[3]]: 2600,
-        [months[4]]: 2800,
-        [months[5]]: 3000,
-      };
-    } else if (fileName.includes('方案B') || fileName.includes('保守') || fileName.includes('低目标')) {
-      return {
-        [months[0]]: 1200,
-        [months[1]]: 1300,
-        [months[2]]: 1400,
-        [months[3]]: 1500,
-        [months[4]]: 1600,
-        [months[5]]: 1700,
-      };
-    } else {
-      return {
-        [months[0]]: 1500,
-        [months[1]]: 1650,
-        [months[2]]: 1800,
-        [months[3]]: 1950,
-        [months[4]]: 2100,
-        [months[5]]: 2250,
-      };
+    const patterns = [
+      /^(\d{4})[-/年\.](\d{1,2})[-/月\.]?/,
+      /^(\d{1,2})[-/月\.]?(\d{4})?/,
+      /^(\d{4})(\d{2})$/,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = trimmed.match(pattern);
+      if (match) {
+        let year = match[1];
+        let month = match[2];
+        if (pattern === patterns[2]) {
+          year = match[1];
+          month = match[2];
+        } else if (pattern === patterns[1] && !match[2]) {
+          const currentYear = new Date().getFullYear();
+          year = String(currentYear);
+          month = match[1];
+        }
+        const monthNum = String(month).padStart(2, '0');
+        if (parseInt(monthNum) >= 1 && parseInt(monthNum) <= 12) {
+          return `${year}-${monthNum}`;
+        }
+      }
     }
+    
+    return trimmed;
+  };
+
+  const parseExcelTargets = (jsonData: Record<string, any>[]): { targets: Record<string, number>; monthKey: string; targetKey: string } | null => {
+    if (!jsonData || jsonData.length === 0) return null;
+    
+    const firstRow = jsonData[0];
+    const keys = Object.keys(firstRow);
+    
+    if (keys.length < 2) return null;
+    
+    const monthKeywords = ['月份', 'month', 'Month', '日期', 'date', 'Date', '时间', '月', '周期'];
+    const targetKeywords = ['目标', 'target', 'Target', '审查量', '计划', 'plan', 'Plan', '数量', '件数', '预期', '预计'];
+    
+    let monthKey = keys.find(k => monthKeywords.some(kw => k.toLowerCase().includes(kw.toLowerCase())));
+    let targetKey = keys.find(k => targetKeywords.some(kw => k.toLowerCase().includes(kw.toLowerCase())));
+    
+    if (!monthKey) monthKey = keys[0];
+    if (!targetKey || targetKey === monthKey) {
+      targetKey = keys.find(k => k !== monthKey && 
+        (typeof firstRow[k] === 'number' || 
+         !isNaN(Number(firstRow[k])) ||
+         String(firstRow[k]).match(/^\d+$/))) || keys[1];
+    }
+    
+    const targets: Record<string, number> = {};
+    
+    for (const row of jsonData) {
+      const rawMonth = row[monthKey];
+      const rawTarget = row[targetKey];
+      
+      if (rawMonth === undefined || rawMonth === null || rawTarget === undefined || rawTarget === null) continue;
+      
+      const monthStr = formatMonthKey(String(rawMonth));
+      const targetNum = typeof rawTarget === 'number' ? rawTarget : Number(String(rawTarget).replace(/[^\d.]/g, ''));
+      
+      if (monthStr && !isNaN(targetNum) && targetNum > 0) {
+        targets[monthStr] = Math.round(targetNum);
+      }
+    }
+    
+    const sortedMonths = Object.keys(targets).sort();
+    if (sortedMonths.length < 2) return null;
+    
+    return { targets, monthKey, targetKey };
   };
 
   const handleFile = useCallback((file: File) => {
@@ -94,39 +138,42 @@ export default function StaffForecast() {
     reader.onload = (e) => {
       try {
         const data = e.target?.result;
-        const workbook = XLSX.read(data, { type: 'binary' });
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(firstSheet) as Record<string, any>[];
+        const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
+        const sheetName = workbook.SheetNames[0];
+        const firstSheet = workbook.Sheets[sheetName];
         
-        let targets: Record<string, number> = {};
+        let jsonData = XLSX.utils.sheet_to_json(firstSheet, { defval: '' }) as Record<string, any>[];
         
-        if (jsonData.length > 0) {
-          const firstRow = jsonData[0];
-          const keys = Object.keys(firstRow);
-          
-          const monthKey = keys.find(k => 
-            k.includes('月份') || k.includes('month') || k.includes('Month')
-          ) || keys[0];
-          
-          const targetKey = keys.find(k => 
-            k.includes('目标') || k.includes('target') || k.includes('Target') || 
-            k.includes('审查量') || k.includes('计划')
-          ) || keys[1];
-          
-          jsonData.forEach((row) => {
-            const month = String(row[monthKey] || '').trim();
-            const target = Number(row[targetKey]) || 0;
-            if (month && target > 0) {
-              targets[month] = target;
-            }
-          });
+        if (jsonData.length === 0) {
+          jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' }) as any[];
+          if (jsonData.length > 1) {
+            const headers = jsonData[0] as string[];
+            jsonData = jsonData.slice(1).map((row: any[]) => {
+              const obj: Record<string, any> = {};
+              headers.forEach((h, i) => {
+                obj[String(h || `列${i + 1}`)] = row[i];
+              });
+              return obj;
+            });
+          }
         }
         
-        if (Object.keys(targets).length < 3) {
-          targets = getMockTargets(file.name);
+        const result = parseExcelTargets(jsonData);
+        
+        if (!result || Object.keys(result.targets).length < 2) {
+          setParseError(`无法解析目标审查量数据。请确保Excel包含"月份"和"目标审查量"两列，且至少有2个月的数据。\n当前识别：${result?.monthKey || '未识别月份列'} / ${result?.targetKey || '未识别目标列'}`);
+          setIsParsing(false);
+          clearInterval(interval);
+          setParseProgress(100);
+          return;
         }
         
-        updateStaffForecast(targets);
+        const sortedTargets: Record<string, number> = {};
+        Object.keys(result.targets).sort().forEach(key => {
+          sortedTargets[key] = result.targets[key];
+        });
+        
+        updateStaffForecast(sortedTargets);
         regenerateStaffPlans();
         
         setTimeout(() => {
@@ -134,23 +181,14 @@ export default function StaffForecast() {
         }, 500);
         
       } catch (error) {
-        const targets = getMockTargets(file.name);
-        updateStaffForecast(targets);
-        regenerateStaffPlans();
-        setTimeout(() => {
-          setIsParsing(false);
-        }, 500);
+        setParseError('文件解析失败，请确认是有效的Excel文件（.xlsx/.xls/.csv格式）');
+        setIsParsing(false);
       }
     };
     
     reader.onerror = () => {
-      setParseError('文件读取失败');
-      const targets = getMockTargets(file.name);
-      updateStaffForecast(targets);
-      regenerateStaffPlans();
-      setTimeout(() => {
-        setIsParsing(false);
-      }, 500);
+      setParseError('文件读取失败，请检查文件是否损坏');
+      setIsParsing(false);
     };
     
     reader.readAsBinaryString(file);
@@ -408,14 +446,15 @@ export default function StaffForecast() {
 
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
         <h3 className="font-semibold text-blue-800 mb-2 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4" />
-          验收测试说明
+          <FileSpreadsheet className="w-4 h-4" />
+          Excel格式说明
         </h3>
         <ul className="text-sm text-blue-700 space-y-1">
-          <li>• 上传文件名包含「方案A」「高标准」「高目标」：使用高目标值（1800-3000件/月），缺口较大，招聘需求多</li>
-          <li>• 上传文件名包含「方案B」「保守」「低目标」：使用低目标值（1200-1700件/月），缺口较小，招聘需求少</li>
-          <li>• 其他文件名：使用中等目标值（1500-2250件/月）</li>
-          <li>• 真实Excel格式需包含「月份」和「目标审查量」两列</li>
+          <li>• 表格需包含「月份」列和「目标审查量」列（支持中英文表头自动识别）</li>
+          <li>• 月份格式支持：2024-07、2024年7月、2024/07、202407、7月 等多种格式</li>
+          <li>• 目标审查量必须为数字，且至少包含2个月以上的数据</li>
+          <li>• 支持 .xlsx / .xls / .csv 格式的表格文件</li>
+          <li>• 系统将完全按照表格中的目标审查量计算缺口和招聘方案</li>
         </ul>
       </div>
 

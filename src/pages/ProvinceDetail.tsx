@@ -79,43 +79,65 @@ export default function ProvinceDetail() {
     });
   }, [provinceAgencies, applications]);
 
+  const seededRandom = (seed: string): number => {
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) {
+      const char = seed.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash) / 2147483647;
+  };
+
+  const getSeededValue = (base: number, variance: number, seed: string): number => {
+    const rand = seededRandom(seed);
+    return Math.round(base + (rand - 0.5) * variance * 2);
+  };
+
   const provinceDailyTrends = useMemo(() => {
     const provinceApps = applications.filter((a) => a.provinceId === selectedProvinceId);
     const last7Days = dailyTrends.slice(-7);
-    return last7Days.map((trend) => {
+    const baseMultiplier = 8 + seededRandom(selectedProvinceId) * 12;
+    const grantRatio = 0.55 + seededRandom(selectedProvinceId + '-grant') * 0.15;
+    const rejectRatio = 0.12 + seededRandom(selectedProvinceId + '-reject') * 0.08;
+    
+    return last7Days.map((trend, idx) => {
       const dayApps = provinceApps.filter((a) => a.applyDate.startsWith(trend.date));
-      const grants = dayApps.filter((a) => a.status === 'granted').length;
-      const rejections = dayApps.filter((a) => a.status === 'rejected').length;
-      const avgCycle = dayApps.length > 0
-        ? dayApps.reduce((sum, a) => {
-            const start = new Date(a.applyDate);
-            const end = a.grantDate || a.rejectDate
-              ? new Date(a.grantDate || a.rejectDate!)
-              : new Date();
-            return sum + Math.max(1, Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
-          }, 0) / dayApps.length
-        : 90;
+      const daySeed = `${selectedProvinceId}-${trend.date}`;
+      const dayVariation = seededRandom(daySeed) * 0.4 - 0.2;
+      
+      const appCount = Math.max(5, Math.round(
+        dayApps.length * baseMultiplier * (1 + dayVariation)
+      ));
+      const grantCount = Math.max(2, Math.round(appCount * grantRatio));
+      const rejectionCount = Math.max(1, Math.round(appCount * rejectRatio));
+      
+      const cycleBase = 75 + seededRandom(selectedProvinceId + '-cycle') * 30;
+      const cycleVariation = seededRandom(daySeed + '-cycle') * 10 - 5;
+      
       return {
         ...trend,
-        applications: dayApps.length + Math.floor(Math.random() * 30),
-        grants: grants + Math.floor(Math.random() * 15),
-        rejections: rejections + Math.floor(Math.random() * 10),
-        avgCycle,
+        applications: appCount,
+        grants: grantCount,
+        rejections: rejectionCount,
+        avgCycle: cycleBase + cycleVariation,
       };
     });
   }, [dailyTrends, applications, selectedProvinceId]);
 
   const provinceRejectReasons = useMemo(() => {
-    const provinceApps = applications.filter(
-      (a) => a.provinceId === selectedProvinceId && a.status === 'rejected'
-    );
     const baseCounts = [28, 22, 18, 12, 8, 6, 4, 2];
-    const multiplier = 0.7 + Math.random() * 0.6;
-    return rejectReasons.map((r, i) => ({
-      ...r,
-      count: Math.max(3, Math.floor(baseCounts[i] * multiplier)),
-    })) as RejectReasonStat[];
-  }, [rejectReasons, applications, selectedProvinceId]);
+    const multiplier = 0.6 + seededRandom(selectedProvinceId + '-reject-dist') * 0.7;
+    
+    return rejectReasons.map((r, i) => {
+      const seed = `${selectedProvinceId}-reject-${i}`;
+      const variation = seededRandom(seed) * 0.3 - 0.15;
+      return {
+        ...r,
+        count: Math.max(3, Math.floor(baseCounts[i] * multiplier * (1 + variation))),
+      };
+    }) as RejectReasonStat[];
+  }, [rejectReasons, selectedProvinceId]);
 
   const availableProvinces = useMemo(() => {
     if (user?.role === 'provincial' && user.provinceId) {
