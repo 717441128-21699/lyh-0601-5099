@@ -177,16 +177,14 @@ export default function Dashboard() {
               : new Date();
             return sum + Math.max(1, Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
           }, 0) / dayApps.length
-        : 90;
-      
-      const scaleFactor = trend.applications / 120;
+        : 0;
       
       return {
         ...trend,
-        applications: Math.round(dayApps.length * 0.7 + 5 + (dayApps.length > 0 ? scaleFactor * 10 : 0)),
-        grants: Math.max(1, Math.round(grants * 0.8 + 2)),
-        rejections: Math.max(0, Math.round(rejections * 0.9)),
-        avgCycle: Math.round(avgCycle * 0.9 + 10),
+        applications: dayApps.length,
+        grants,
+        rejections,
+        avgCycle: Math.round(avgCycle),
       };
     });
   }, [dailyTrends, filteredApps]);
@@ -264,37 +262,38 @@ export default function Dashboard() {
       }
     });
 
-    const metrics = TECH_FIELDS.map((field) => {
-      const stats = fieldMap[field.key];
-      const baseline = baselineMap[field.key];
-      const total = stats?.totalApplications || 1;
-      const baseCount = stats?.totalApplications || 0;
-      const avgCycle = stats && stats.cycleCount > 0 
-        ? stats.totalCycle / stats.cycleCount 
-        : 85 + Math.abs(field.key.charCodeAt(0)) % 20;
-      
-      const baselineTotal = baseline?.totalApplications || 1;
-      const baselineGrantRate = baseline && baseline.cycleCount > 0 
-        ? baseline.granted / baselineTotal 
-        : 0.65 + (field.key.charCodeAt(0) % 20) / 100;
-      const baselineCycle = baseline && baseline.cycleCount > 0 
-        ? baseline.totalCycle / baseline.cycleCount 
-        : 90;
-      
-      return {
-        id: `metric-${field.key}`,
-        techField: field.key,
-        provinceId: selectedProvince,
-        totalApplications: baseCount + Math.floor(field.key.length * 3),
-        avgReviewCycle: avgCycle,
-        grantRate: stats ? stats.granted / total : 0.65 + (field.key.charCodeAt(0) % 20) / 100,
-        rejectRate: stats ? stats.rejected / total : 0.12 + (field.key.charCodeAt(1) % 10) / 100,
-        period: 'day' as const,
-        date: new Date().toISOString().split('T')[0],
-        baselineGrantRate,
-        baselineCycle,
-      };
-    });
+    const metrics = TECH_FIELDS
+      .filter((field) => fieldMap[field.key])
+      .map((field) => {
+        const stats = fieldMap[field.key]!;
+        const baseline = baselineMap[field.key];
+        const total = stats.totalApplications;
+        const avgCycle = stats.cycleCount > 0 
+          ? stats.totalCycle / stats.cycleCount 
+          : 0;
+        
+        const baselineTotal = baseline?.totalApplications || 1;
+        const baselineGrantRate = baseline && baseline.cycleCount > 0 
+          ? baseline.granted / baselineTotal 
+          : 0;
+        const baselineCycle = baseline && baseline.cycleCount > 0 
+          ? baseline.totalCycle / baseline.cycleCount 
+          : 0;
+        
+        return {
+          id: `metric-${field.key}`,
+          techField: field.key,
+          provinceId: selectedProvince,
+          totalApplications: total,
+          avgReviewCycle: avgCycle,
+          grantRate: total > 0 ? stats.granted / total : 0,
+          rejectRate: total > 0 ? stats.rejected / total : 0,
+          period: 'day' as const,
+          date: new Date().toISOString().split('T')[0],
+          baselineGrantRate,
+          baselineCycle,
+        };
+      });
 
     return metrics.sort((a, b) => b.grantRate - a.grantRate);
   }, [filteredApps, selectedProvince, permissionFilteredApps]);
@@ -330,19 +329,38 @@ export default function Dashboard() {
     return reports;
   }, [reports, user]);
 
-  const totalApplications = displayProvinceMetrics.reduce((sum, p) => sum + p.totalApplications, 0);
-  const avgReviewCycle =
-    displayProvinceMetrics.length > 0
-      ? displayProvinceMetrics.reduce((sum, p) => sum + p.avgReviewCycle, 0) / displayProvinceMetrics.length
-      : 0;
-  const avgGrantRate =
-    displayProvinceMetrics.length > 0
-      ? displayProvinceMetrics.reduce((sum, p) => sum + p.grantRate, 0) / displayProvinceMetrics.length
-      : 0;
-  const avgRejectRate =
-    displayProvinceMetrics.length > 0
-      ? displayProvinceMetrics.reduce((sum, p) => sum + p.rejectRate, 0) / displayProvinceMetrics.length
-      : 0;
+  const kpiMetrics = useMemo(() => {
+    const total = filteredApps.length;
+    const granted = filteredApps.filter(a => a.status === 'granted').length;
+    const rejected = filteredApps.filter(a => a.status === 'rejected').length;
+    
+    let totalCycle = 0;
+    let cycleCount = 0;
+    filteredApps.forEach(app => {
+      const endDate = app.grantDate || app.rejectDate;
+      if (endDate) {
+        const cycle = Math.max(1, Math.floor(
+          (new Date(endDate).getTime() - new Date(app.applyDate).getTime()) / (1000 * 60 * 60 * 24)
+        ));
+        totalCycle += cycle;
+        cycleCount += 1;
+      }
+    });
+    
+    return {
+      totalApplications: total,
+      avgReviewCycle: cycleCount > 0 ? totalCycle / cycleCount : 0,
+      grantRate: total > 0 ? granted / total : 0,
+      rejectRate: total > 0 ? rejected / total : 0,
+    };
+  }, [filteredApps]);
+
+  const {
+    totalApplications,
+    avgReviewCycle,
+    grantRate: avgGrantRate,
+    rejectRate: avgRejectRate,
+  } = kpiMetrics;
 
   const latestReport = filteredReports[0];
 

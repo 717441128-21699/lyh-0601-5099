@@ -65,8 +65,10 @@ export default function StaffForecast() {
     return Math.abs(hash).toString(36);
   };
 
-  const generateFileHash = (content: string, fileName: string): string => {
-    return hashCode(content + fileName + content.length);
+  const generateTargetsHash = (targets: Record<string, number>): string => {
+    const sortedKeys = Object.keys(targets).sort();
+    const contentStr = sortedKeys.map(k => `${k}:${targets[k]}`).join('|');
+    return hashCode(contentStr);
   };
 
   const formatMonthKey = (monthStr: string): string => {
@@ -254,23 +256,6 @@ export default function StaffForecast() {
     reader.onload = (e) => {
       try {
         const data = e.target?.result;
-        const fileContent = String(data);
-        const fileHash = generateFileHash(fileContent, file.name);
-        
-        if (activeSlot === 'A' && planA?.fileHash === fileHash) {
-          setParseError('该文件已作为方案A上传，请上传不同的文件作为方案B');
-          setIsParsing(false);
-          clearInterval(interval);
-          setParseProgress(100);
-          return;
-        }
-        if (activeSlot === 'B' && planB?.fileHash === fileHash) {
-          setParseError('该文件已作为方案B上传，请上传不同的文件作为方案A');
-          setIsParsing(false);
-          clearInterval(interval);
-          setParseProgress(100);
-          return;
-        }
         
         const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
         const sheetName = workbook.SheetNames[0];
@@ -307,12 +292,29 @@ export default function StaffForecast() {
           sortedTargets[key] = result.targets[key];
         });
         
-        const { forecast, plans } = computeForecastFromTargets(sortedTargets, fileHash);
+        const contentHash = generateTargetsHash(sortedTargets);
+        
+        if (activeSlot === 'A' && planA?.fileHash === contentHash) {
+          setParseError('该表的目标审查量数据与方案A完全相同，请上传不同目标数据的表作为方案B');
+          setIsParsing(false);
+          clearInterval(interval);
+          setParseProgress(100);
+          return;
+        }
+        if (activeSlot === 'B' && planB?.fileHash === contentHash) {
+          setParseError('该表的目标审查量数据与方案B完全相同，请上传不同目标数据的表作为方案A');
+          setIsParsing(false);
+          clearInterval(interval);
+          setParseProgress(100);
+          return;
+        }
+        
+        const { forecast, plans } = computeForecastFromTargets(sortedTargets, contentHash);
         
         const newPlan: UploadedPlan = {
-          id: fileHash,
+          id: contentHash,
           fileName: file.name,
-          fileHash,
+          fileHash: contentHash,
           targets: sortedTargets,
           forecast,
           plans,
@@ -325,8 +327,8 @@ export default function StaffForecast() {
           setPlanB(newPlan);
         }
         
-        updateStaffForecast(sortedTargets, fileHash);
-        regenerateStaffPlans(fileHash);
+        updateStaffForecast(sortedTargets, contentHash);
+        regenerateStaffPlans(contentHash);
         
         setTimeout(() => {
           setIsParsing(false);
@@ -386,9 +388,29 @@ export default function StaffForecast() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const currentForecast = planA?.forecast || planB?.forecast || baseForecast;
-  const currentPlans = planA?.plans || planB?.plans || basePlans;
-  const currentFileName = planA?.fileName || planB?.fileName;
+  const currentForecast = useMemo(() => {
+    if (activeSlot === 'A' && planA) return planA.forecast;
+    if (activeSlot === 'B' && planB) return planB.forecast;
+    if (planA) return planA.forecast;
+    if (planB) return planB.forecast;
+    return baseForecast;
+  }, [activeSlot, planA, planB, baseForecast]);
+
+  const currentPlans = useMemo(() => {
+    if (activeSlot === 'A' && planA) return planA.plans;
+    if (activeSlot === 'B' && planB) return planB.plans;
+    if (planA) return planA.plans;
+    if (planB) return planB.plans;
+    return basePlans;
+  }, [activeSlot, planA, planB, basePlans]);
+
+  const currentFileName = useMemo(() => {
+    if (activeSlot === 'A' && planA) return planA.fileName;
+    if (activeSlot === 'B' && planB) return planB.fileName;
+    if (planA) return planA.fileName;
+    if (planB) return planB.fileName;
+    return undefined;
+  }, [activeSlot, planA, planB]);
 
   const comparisonChartOption = useMemo(() => {
     if (!planA || !planB) return null;
