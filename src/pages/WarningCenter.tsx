@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useDataStore } from '@/store/dataStore';
 import { useAuthStore } from '@/store/authStore';
 import type { Warning, WarningStatus } from '@/types';
@@ -30,7 +30,15 @@ const levelColors = {
 };
 
 export default function WarningCenter() {
-  const { warnings, approvalFlows, loadAllData, updateWarningStatus, isLoaded } = useDataStore();
+  const { 
+    warnings, 
+    approvalFlows, 
+    loadAllData, 
+    updateWarningStatus, 
+    isLoaded,
+    createApprovalFlow,
+    updateWarningApprovalFlowId,
+  } = useDataStore();
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<TabType>('pending');
   const [selectedWarning, setSelectedWarning] = useState<Warning | null>(null);
@@ -40,11 +48,23 @@ export default function WarningCenter() {
     if (!isLoaded) loadAllData();
   }, [isLoaded, loadAllData]);
 
-  const filteredWarnings = warnings.filter((w) => w.status === activeTab);
+  const permissionFilteredWarnings = useMemo(() => {
+    if (!user) return warnings;
+    if (user.role === 'national') return warnings;
+    if (user.role === 'provincial' && user.provinceId) {
+      return warnings.filter((w) => w.provinceId === user.provinceId);
+    }
+    if ((user.role === 'agency' || user.role === 'examiner') && user.agencyId) {
+      return warnings.filter((w) => w.agencyId === user.agencyId);
+    }
+    return warnings;
+  }, [warnings, user]);
+
+  const filteredWarnings = permissionFilteredWarnings.filter((w) => w.status === activeTab);
   const counts = {
-    pending: warnings.filter((w) => w.status === 'pending').length,
-    processing: warnings.filter((w) => w.status === 'processing').length,
-    resolved: warnings.filter((w) => w.status === 'resolved').length,
+    pending: permissionFilteredWarnings.filter((w) => w.status === 'pending').length,
+    processing: permissionFilteredWarnings.filter((w) => w.status === 'processing').length,
+    resolved: permissionFilteredWarnings.filter((w) => w.status === 'resolved').length,
   };
 
   const canHandle = canHandleWarning(user);
@@ -64,9 +84,32 @@ export default function WarningCenter() {
   };
 
   const handleStartApproval = () => {
-    if (!selectedWarning) return;
+    if (!selectedWarning || !user) return;
+    
+    const targetAgencyId = selectedWarning.agencyId || 'gd-2';
+    
+    const proposal = {
+      targetAgencyId,
+      sourceAgencyId: 'gd-1',
+      techField: selectedWarning.techField,
+      examinerCount: Math.min(3, Math.max(1, Math.floor(selectedWarning.metricValue / 30))),
+      reason: selectedWarning.message,
+      expectedEffect: `预计30天内将${selectedWarning.type === 'cycle_exceed' ? '审查周期' : '授权率'}恢复至正常水平`,
+      estimatedDuration: 30,
+    };
+    
+    const flowId = createApprovalFlow(selectedWarning.id, proposal);
+    
+    updateWarningApprovalFlowId(selectedWarning.id, flowId);
+    
     updateWarningStatus(selectedWarning.id, 'processing');
-    setSelectedWarning({ ...selectedWarning, status: 'processing' });
+    
+    setSelectedWarning({ 
+      ...selectedWarning, 
+      status: 'processing',
+      approvalFlowId: flowId,
+    });
+    
     setStartApprovalOpen(false);
   };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import ReactECharts from 'echarts-for-react';
 import { FileText, Download, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, Lightbulb, Clock, CheckCircle, XCircle, BarChart3 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -16,6 +16,23 @@ export default function Reports() {
   useEffect(() => {
     if (!isLoaded) loadAllData();
   }, [isLoaded, loadAllData]);
+
+  const filteredReports = useMemo(() => {
+    if (!user) return reports;
+    if (user.role === 'national') return reports;
+    if (user.role === 'provincial' && user.provinceId) {
+      return reports.filter((r) => 
+        r.scope === 'national' || 
+        (r.scope === 'provincial' && r.scopeId === user.provinceId)
+      );
+    }
+    if ((user.role === 'agency' || user.role === 'examiner') && user.agencyId) {
+      return reports.filter((r) => 
+        r.scope === 'agency' && r.scopeId === user.agencyId
+      );
+    }
+    return reports;
+  }, [reports, user]);
 
   const toggleExpand = (id: string) => {
     setExpandedId(expandedId === id ? null : id);
@@ -215,43 +232,50 @@ export default function Reports() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {reports.map((report) => (
-          <div key={report.id} className="card card-hover overflow-hidden">
-            <div
-              className="p-5 cursor-pointer"
-              onClick={() => toggleExpand(report.id)}
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
-                    <FileText className="w-6 h-6 text-primary-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-800 text-lg">{report.title}</h3>
-                    <p className="text-sm text-gray-500 mt-1">
-                      {formatDate(report.period.start)} ~ {formatDate(report.period.end)}
-                    </p>
-                    <div className="flex items-center gap-2 mt-3">
-                      <span className="badge badge-info">周报</span>
-                      <span className="badge badge-success">{getScopeLabel(report)}</span>
+        {filteredReports.length === 0 ? (
+          <div className="col-span-full bg-white rounded-xl border border-gray-200 p-12 text-center">
+            <FileText size={48} className="mx-auto text-gray-300 mb-3" />
+            <p className="text-gray-500">暂无权限范围内的报告</p>
+          </div>
+        ) : (
+          filteredReports.map((report) => (
+            <div key={report.id} className="card card-hover overflow-hidden">
+              <div
+                className="p-5 cursor-pointer"
+                onClick={() => toggleExpand(report.id)}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                      <FileText className="w-6 h-6 text-primary-600" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-gray-800 text-lg">{report.title}</h3>
+                      <p className="text-sm text-gray-500 mt-1">
+                        {formatDate(report.period.start)} ~ {formatDate(report.period.end)}
+                      </p>
+                      <div className="flex items-center gap-2 mt-3">
+                        <span className="badge badge-info">周报</span>
+                        <span className="badge badge-success">{getScopeLabel(report)}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-gray-400">
-                    {formatDateTime(report.generatedAt)}
-                  </span>
-                  {expandedId === report.id ? (
-                    <ChevronUp className="w-5 h-5 text-gray-400" />
-                  ) : (
-                    <ChevronDown className="w-5 h-5 text-gray-400" />
-                  )}
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-gray-400">
+                      {formatDateTime(report.generatedAt)}
+                    </span>
+                    {expandedId === report.id ? (
+                      <ChevronUp className="w-5 h-5 text-gray-400" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-gray-400" />
+                    )}
+                  </div>
                 </div>
               </div>
+              {expandedId === report.id && renderReportDetail(report)}
             </div>
-            {expandedId === report.id && renderReportDetail(report)}
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );

@@ -29,7 +29,7 @@ export default function Sidebar() {
 
   const menuItems: MenuItem[] = [
     { path: '/', label: '总览看板', icon: LayoutDashboard },
-    { path: '/provinces', label: '省份详情', icon: MapPin },
+    { path: '/province', label: '省份详情', icon: MapPin },
     { path: '/warnings', label: '预警中心', icon: AlertTriangle },
     { path: '/approvals', label: '审批中心', icon: CheckSquare },
     {

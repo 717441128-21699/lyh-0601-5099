@@ -104,6 +104,7 @@ export interface Warning {
   type: WarningType;
   techField: TechField;
   provinceId?: string;
+  agencyId?: string;
   metricValue: number;
   thresholdValue: number;
   triggeredAt: string;

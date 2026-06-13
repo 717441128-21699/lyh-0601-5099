@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useDataStore } from '@/store/dataStore';
 import { useAuthStore } from '@/store/authStore';
 import type { ApprovalFlow } from '@/types';
 import { FileText, Clock, CheckCircle, XCircle, Users, Target, Calendar, Lightbulb, TrendingUp, AlertCircle, Send, X, ChevronRight } from 'lucide-react';
 import ApprovalTimeline from '@/components/common/ApprovalTimeline';
-import { getTechFieldName, getAgencyName } from '@/data/constants';
+import { getTechFieldName, getAgencyName, getAgenciesByProvince } from '@/data/constants';
 import { formatDateTime, formatDays } from '@/utils/formatters';
 import { canApproveStep, getRoleName } from '@/utils/permissions';
 
@@ -26,13 +26,32 @@ export default function ApprovalCenter() {
     if (!isLoaded) loadAllData();
   }, [isLoaded, loadAllData]);
 
-  useEffect(() => {
-    if (approvalFlows.length > 0 && !selectedFlow) {
-      setSelectedFlow(approvalFlows[0]);
+  const filteredFlows = useMemo(() => {
+    if (!user) return approvalFlows;
+    if (user.role === 'national') return approvalFlows;
+    if (user.role === 'provincial' && user.provinceId) {
+      const provinceAgencies = getAgenciesByProvince(user.provinceId).map((a) => a.id);
+      return approvalFlows.filter((f) => 
+        provinceAgencies.includes(f.proposal.targetAgencyId) ||
+        provinceAgencies.includes(f.proposal.sourceAgencyId || '')
+      );
     }
-  }, [approvalFlows, selectedFlow]);
+    if ((user.role === 'agency' || user.role === 'examiner') && user.agencyId) {
+      return approvalFlows.filter((f) => 
+        f.proposal.targetAgencyId === user.agencyId ||
+        f.proposal.sourceAgencyId === user.agencyId
+      );
+    }
+    return approvalFlows;
+  }, [approvalFlows, user]);
 
-  const pendingFlows = approvalFlows.filter((f) => f.status !== 'approved' && f.status !== 'rejected');
+  useEffect(() => {
+    if (filteredFlows.length > 0 && !selectedFlow) {
+      setSelectedFlow(filteredFlows[0]);
+    }
+  }, [filteredFlows, selectedFlow]);
+
+  const pendingFlows = filteredFlows.filter((f) => f.status !== 'approved' && f.status !== 'rejected');
   const canApprove = selectedFlow && user && canApproveStep(user, selectedFlow.currentStep) && 
     selectedFlow.status !== 'approved' && selectedFlow.status !== 'rejected';
 
@@ -69,13 +88,13 @@ export default function ApprovalCenter() {
                 </span>
               </div>
               <div className="divide-y divide-gray-100 max-h-[calc(100vh-240px)] overflow-y-auto">
-                {approvalFlows.length === 0 ? (
+                {filteredFlows.length === 0 ? (
                   <div className="p-8 text-center">
                     <FileText size={36} className="mx-auto text-gray-300 mb-2" />
                     <p className="text-sm text-gray-500">暂无审批流程</p>
                   </div>
                 ) : (
-                  approvalFlows.map((flow) => {
+                  filteredFlows.map((flow) => {
                     const status = statusLabels[flow.status];
                     const isSelected = selectedFlow?.id === flow.id;
                     return (
